@@ -1,0 +1,521 @@
+// Trip Planner - Complete Database Schema (MySQL 8.0)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ============================================
+// MODULE 1: User Management
+// ============================================
+model User {
+  id                 Int       @id @default(autoincrement())
+  email              String    @unique @db.VarChar(255)
+  passwordHash       String    @map("password_hash") @db.VarChar(255)
+  name               String    @db.VarChar(100)
+  avatarUrl          String?   @map("avatar_url") @db.VarChar(500)
+  preferredCurrency  String    @default("USD") @map("preferred_currency") @db.VarChar(3)
+  isAdmin            Boolean   @default(false) @map("is_admin")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  ownedTrips         Trip[]           @relation("TripOwner")
+  tripMembers        TripMember[]
+  hotelBookings      HotelBooking[]
+  flightBookings     FlightBooking[]
+  expenses           Expense[]        @relation("ExpensePaidBy")
+  expenseSplits      ExpenseSplit[]
+  notifications      Notification[]
+  priceAlerts        PriceAlert[]
+  packingTemplates   PackingTemplate[]
+  tripPackingItems   TripPackingItem[]
+  userPreferences    UserPreference?
+  placeReviews       PlaceReview[]
+  recommendationLogs RecommendationLog[]
+
+  @@map("users")
+}
+
+// ============================================
+// MODULE 2: Trip Planning
+// ============================================
+model Trip {
+  id          Int       @id @default(autoincrement())
+  name        String    @db.VarChar(200)
+  ownerId     Int       @map("owner_id")
+  startDate   DateTime  @map("start_date") @db.Date
+  endDate     DateTime  @map("end_date") @db.Date
+  totalBudget Decimal   @default(0) @map("total_budget") @db.Decimal(12, 2)
+  status      String    @default("Planning") @db.VarChar(20)
+  coverImage  String?   @map("cover_image") @db.VarChar(500)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  owner          User            @relation("TripOwner", fields: [ownerId], references: [id])
+  members        TripMember[]
+  itineraryDays  ItineraryDay[]
+  hotelBookings  HotelBooking[]
+  flightBookings FlightBooking[]
+  expenses       Expense[]
+  packingItems   TripPackingItem[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@index([startDate])
+  @@map("trips")
+}
+
+model TripMember {
+  id           Int     @id @default(autoincrement())
+  tripId       Int     @map("trip_id")
+  userId       Int     @map("user_id")
+  role         String  @default("member") @db.VarChar(20)
+  costSharePct Decimal @default(0) @map("cost_share_pct") @db.Decimal(5, 2)
+
+  // Relations
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([tripId, userId])
+  @@index([userId])
+  @@map("trip_members")
+}
+
+// ============================================
+// MODULE 3: Destinations & Itinerary
+// ============================================
+model Destination {
+  id           Int     @id @default(autoincrement())
+  city         String  @db.VarChar(100)
+  country      String  @db.VarChar(100)
+  latitude     Decimal @db.Decimal(10, 7)
+  longitude    Decimal @db.Decimal(10, 7)
+  bestSeason   String? @map("best_season") @db.VarChar(50)
+  heroImageUrl String? @map("hero_image_url") @db.VarChar(500)
+  description  String? @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  itineraryDays    ItineraryDay[]
+  hotels           Hotel[]
+  weatherCache     WeatherCache[]
+  crowdForecasts   CrowdForecast[]
+  placeReviews     PlaceReview[]
+  recommendationLogs RecommendationLog[]
+
+  @@index([city, country])
+  @@map("destinations")
+}
+
+model ItineraryDay {
+  id            Int       @id @default(autoincrement())
+  tripId        Int       @map("trip_id")
+  destinationId Int       @map("destination_id")
+  dayNumber     Int       @map("day_number")
+  date          DateTime  @db.Date
+  notes         String?   @db.Text
+
+  // Relations
+  trip        Trip        @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  destination Destination @relation(fields: [destinationId], references: [id])
+  activities  Activity[]
+
+  @@index([tripId, dayNumber])
+  @@index([destinationId])
+  @@map("itinerary_days")
+}
+
+model Activity {
+  id             Int     @id @default(autoincrement())
+  itineraryDayId Int     @map("itinerary_day_id")
+  time           String  @db.VarChar(10)
+  name           String  @db.VarChar(200)
+  cost           Decimal @default(0) @db.Decimal(10, 2)
+  notes          String? @db.Text
+  imageUrl       String? @map("image_url") @db.VarChar(500)
+  category       String? @db.VarChar(50)
+
+  // Relations
+  itineraryDay ItineraryDay @relation(fields: [itineraryDayId], references: [id], onDelete: Cascade)
+
+  @@index([itineraryDayId])
+  @@map("activities")
+}
+
+// ============================================
+// MODULE 4: Accommodation (Hotels)
+// ============================================
+model Hotel {
+  id            Int     @id @default(autoincrement())
+  name          String  @db.VarChar(200)
+  destinationId Int     @map("destination_id")
+  address       String? @db.VarChar(500)
+  pricePerNight Decimal @map("price_per_night") @db.Decimal(10, 2)
+  rating        Decimal @default(0) @db.Decimal(2, 1)
+  amenities     Json?
+  images        Json?
+  description   String? @db.Text
+
+  // Relations
+  destination Destination    @relation(fields: [destinationId], references: [id])
+  bookings    HotelBooking[]
+
+  @@index([destinationId])
+  @@index([rating])
+  @@map("hotels")
+}
+
+model HotelBooking {
+  id              Int      @id @default(autoincrement())
+  tripId          Int      @map("trip_id")
+  hotelId         Int      @map("hotel_id")
+  userId          Int      @map("user_id")
+  checkIn         DateTime @map("check_in") @db.Date
+  checkOut        DateTime @map("check_out") @db.Date
+  rooms           Int      @default(1)
+  totalPrice      Decimal  @map("total_price") @db.Decimal(12, 2)
+  discountApplied Decimal  @default(0) @map("discount_applied") @db.Decimal(5, 2)
+  status          String   @default("Confirmed") @db.VarChar(20)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  // Relations
+  trip  Trip  @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  hotel Hotel @relation(fields: [hotelId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@index([tripId])
+  @@index([hotelId])
+  @@index([userId])
+  @@map("hotel_bookings")
+}
+
+model GroupDiscount {
+  id          Int     @id @default(autoincrement())
+  minMembers  Int     @map("min_members")
+  discountPct Decimal @map("discount_pct") @db.Decimal(5, 2)
+  description String? @db.VarChar(200)
+
+  @@map("group_discounts")
+}
+
+// ============================================
+// MODULE 5: Flights & Cheap Ticket Advisor
+// ============================================
+model Flight {
+  id            Int      @id @default(autoincrement())
+  airline       String   @db.VarChar(100)
+  flightNumber  String   @map("flight_number") @db.VarChar(20)
+  origin        String   @db.VarChar(100)
+  destination   String   @db.VarChar(100)
+  departureTime DateTime @map("departure_time")
+  arrivalTime   DateTime @map("arrival_time")
+  durationMins  Int      @map("duration_mins")
+  basePrice     Decimal  @map("base_price") @db.Decimal(10, 2)
+  class         String   @default("Economy") @db.VarChar(20)
+
+  // Relations
+  bookings FlightBooking[]
+
+  @@index([origin, destination])
+  @@map("flights")
+}
+
+model FlightBooking {
+  id        Int      @id @default(autoincrement())
+  tripId    Int      @map("trip_id")
+  flightId  Int      @map("flight_id")
+  userId    Int      @map("user_id")
+  pnr       String   @db.VarChar(10)
+  pricePaid Decimal  @map("price_paid") @db.Decimal(10, 2)
+  class     String   @default("Economy") @db.VarChar(20)
+  status    String   @default("Confirmed") @db.VarChar(20)
+  bookedAt  DateTime @default(now()) @map("booked_at")
+
+  // Relations
+  trip   Trip   @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  flight Flight @relation(fields: [flightId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([tripId])
+  @@index([flightId])
+  @@index([userId])
+  @@map("flight_bookings")
+}
+
+model FlightPriceHistory {
+  id              Int      @id @default(autoincrement())
+  routeKey        String   @map("route_key") @db.VarChar(50)
+  travelDate      DateTime @map("travel_date") @db.Date
+  daysBeforeTravel Int     @map("days_before_travel")
+  price           Decimal  @db.Decimal(10, 2)
+  recordedAt      DateTime @default(now()) @map("recorded_at")
+
+  @@index([routeKey, travelDate])
+  @@index([routeKey, daysBeforeTravel])
+  @@map("flight_price_history")
+}
+
+model PriceAlert {
+  id           Int      @id @default(autoincrement())
+  userId       Int      @map("user_id")
+  routeKey     String   @map("route_key") @db.VarChar(50)
+  desiredPrice Decimal  @map("desired_price") @db.Decimal(10, 2)
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([routeKey, isActive])
+  @@map("price_alerts")
+}
+
+// ============================================
+// MODULE 6: Notifications
+// ============================================
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @map("user_id")
+  message   String   @db.Text
+  type      String   @db.VarChar(30)
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ============================================
+// MODULE 7: Packing List
+// ============================================
+model PackingTemplate {
+  id     Int    @id @default(autoincrement())
+  userId Int    @map("user_id")
+  name   String @db.VarChar(100)
+  items  Json
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("packing_templates")
+}
+
+model PackingItem {
+  id        Int    @id @default(autoincrement())
+  name      String @db.VarChar(100)
+  category  String @db.VarChar(50)
+  isDefault Boolean @default(true) @map("is_default")
+
+  // Relations
+  weatherMappings  WeatherItemMapping[]
+  activityMappings ActivityItemMapping[]
+
+  @@map("packing_items")
+}
+
+model WeatherItemMapping {
+  id               Int    @id @default(autoincrement())
+  weatherCondition String @map("weather_condition") @db.VarChar(50)
+  itemId           Int    @map("item_id")
+
+  // Relations
+  item PackingItem @relation(fields: [itemId], references: [id])
+
+  @@index([weatherCondition])
+  @@index([itemId])
+  @@map("weather_item_mapping")
+}
+
+model ActivityItemMapping {
+  id               Int    @id @default(autoincrement())
+  activityCategory String @map("activity_category") @db.VarChar(50)
+  itemId           Int    @map("item_id")
+
+  // Relations
+  item PackingItem @relation(fields: [itemId], references: [id])
+
+  @@index([activityCategory])
+  @@index([itemId])
+  @@map("activity_item_mapping")
+}
+
+model TripPackingItem {
+  id       Int     @id @default(autoincrement())
+  tripId   Int     @map("trip_id")
+  userId   Int     @map("user_id")
+  itemName String  @map("item_name") @db.VarChar(100)
+  isPacked Boolean @default(false) @map("is_packed")
+  isCustom Boolean @default(false) @map("is_custom")
+
+  // Relations
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([tripId, userId])
+  @@map("trip_packing_items")
+}
+
+// ============================================
+// MODULE 8: Admin Analytics (cache table replaces materialized view)
+// ============================================
+model AdminStatsCache {
+  id          Int      @id @default(autoincrement()) @map("stat_id")
+  metricName  String   @map("metric_name") @db.VarChar(100)
+  metricValue Json     @map("metric_value")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@map("admin_stats_cache")
+}
+
+// ============================================
+// MODULE 9: Currency Converter
+// ============================================
+model ExchangeRate {
+  id           Int      @id @default(autoincrement())
+  fromCurrency String   @map("from_currency") @db.VarChar(3)
+  toCurrency   String   @map("to_currency") @db.VarChar(3)
+  rate         Decimal  @db.Decimal(14, 6)
+  validFrom    DateTime @map("valid_from")
+  validTo      DateTime? @map("valid_to")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@unique([fromCurrency, toCurrency])
+  @@index([fromCurrency, toCurrency])
+  @@map("exchange_rates")
+}
+
+// ============================================
+// MODULE 10: Group Budget / Expenses
+// ============================================
+model Expense {
+  id          Int      @id @default(autoincrement())
+  tripId      Int      @map("trip_id")
+  paidBy      Int      @map("paid_by")
+  description String   @db.VarChar(300)
+  amount      Decimal  @db.Decimal(12, 2)
+  currency    String   @default("USD") @db.VarChar(3)
+  category    String   @db.VarChar(50)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  trip   Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  payer  User          @relation("ExpensePaidBy", fields: [paidBy], references: [id])
+  splits ExpenseSplit[]
+
+  @@index([tripId])
+  @@index([paidBy])
+  @@map("expenses")
+}
+
+model ExpenseSplit {
+  id          Int     @id @default(autoincrement())
+  expenseId   Int     @map("expense_id")
+  userId      Int     @map("user_id")
+  shareAmount Decimal @map("share_amount") @db.Decimal(12, 2)
+  isSettled   Boolean @default(false) @map("is_settled")
+
+  // Relations
+  expense Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([expenseId])
+  @@index([userId])
+  @@map("expense_splits")
+}
+
+// ============================================
+// MODULE 11: Weather Forecast
+// ============================================
+model WeatherCache {
+  id            Int      @id @default(autoincrement())
+  destinationId Int      @map("destination_id")
+  forecastDate  DateTime @map("forecast_date") @db.Date
+  tempMin       Decimal? @map("temp_min") @db.Decimal(5, 1)
+  tempMax       Decimal? @map("temp_max") @db.Decimal(5, 1)
+  condition     String?  @db.VarChar(50)
+  icon          String?  @db.VarChar(10)
+  humidity      Int?
+  windSpeed     Decimal? @map("wind_speed") @db.Decimal(5, 1)
+  cachedAt      DateTime @default(now()) @map("cached_at")
+
+  // Relations
+  destination Destination @relation(fields: [destinationId], references: [id])
+
+  @@unique([destinationId, forecastDate])
+  @@index([destinationId, forecastDate])
+  @@map("weather_cache")
+}
+
+// ============================================
+// MODULE 12: AI Suggestions
+// ============================================
+model UserPreference {
+  id                    Int    @id @default(autoincrement())
+  userId                Int    @unique @map("user_id")
+  preferredActivityType String? @map("preferred_activity_type") @db.VarChar(50)
+  crowdTolerance        Int    @default(5) @map("crowd_tolerance")
+  weatherPreference     String? @map("weather_preference") @db.VarChar(50)
+
+  // Relations
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("user_preferences")
+}
+
+model CrowdForecast {
+  id                 Int      @id @default(autoincrement())
+  destinationId      Int      @map("destination_id")
+  forecastDate       DateTime @map("forecast_date") @db.Date
+  expectedCrowdLevel Int      @map("expected_crowd_level")
+
+  // Relations
+  destination Destination @relation(fields: [destinationId], references: [id])
+
+  @@index([destinationId, forecastDate])
+  @@map("crowd_forecasts")
+}
+
+model PlaceReview {
+  id                  Int      @id @default(autoincrement())
+  destinationId       Int      @map("destination_id")
+  userId              Int      @map("user_id")
+  rating              Decimal  @db.Decimal(2, 1)
+  reviewText          String?  @map("review_text") @db.Text
+  recommendationScore Decimal  @default(0) @map("recommendation_score") @db.Decimal(3, 1)
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  // Relations
+  destination Destination @relation(fields: [destinationId], references: [id])
+  user        User        @relation(fields: [userId], references: [id])
+
+  @@index([destinationId])
+  @@index([userId])
+  @@map("place_reviews")
+}
+
+model RecommendationLog {
+  id            Int      @id @default(autoincrement())
+  userId        Int      @map("user_id")
+  destinationId Int      @map("destination_id")
+  score         Decimal  @db.Decimal(5, 2)
+  explanation   String?  @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user        User        @relation(fields: [userId], references: [id])
+  destination Destination @relation(fields: [destinationId], references: [id])
+
+  @@index([userId])
+  @@map("recommendation_logs")
+}
